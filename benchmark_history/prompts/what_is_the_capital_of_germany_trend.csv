@@ -1,0 +1,3 @@
+timestamp,prompt,prompt_type,model,profile,guard_mode,baseline_tok_per_sec,linearised_tok_per_sec,hydrus_tok_per_sec,speedup,consistent,mean_entropy,retrieved_rate,fallback_rate,avg_text_len,accuracy_proxy
+2026-05-31T15:52:15+00:00,What is the capital of Germany?,definition,Qwen/Qwen2.5-3B-Instruct,safe,post,14.2000,14.8000,14.8000,1.042254,1.000000,0.236880,1.000000,0.000000,86.00,0.763120
+2026-05-31T17:41:01+00:00,What is the capital of Germany?,definition,Qwen/Qwen2.5-3B-Instruct,safe,post,16.3000,16.4000,16.4000,1.006135,1.000000,0.236880,0.000000,0.000000,126.00,0.763120

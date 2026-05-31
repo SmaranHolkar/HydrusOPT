@@ -1,0 +1,10 @@
+[
+  {
+    "prompt": "Which number planet from the Sun is Jupiter?",
+    "answer": "fifth",
+    "validator": "one_of",
+    "options": {
+      "answers": ["5", "5th", "the fifth planet"]
+    }
+  }
+]

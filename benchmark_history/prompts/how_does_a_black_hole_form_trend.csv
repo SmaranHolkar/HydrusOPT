@@ -1,0 +1,2 @@
+timestamp,prompt,prompt_type,model,profile,guard_mode,baseline_tok_per_sec,linearised_tok_per_sec,hydrus_tok_per_sec,speedup,consistent,mean_entropy,retrieved_rate,fallback_rate,avg_text_len,accuracy_proxy
+2026-05-31T21:22:55+00:00,How does a black hole form?,open,Qwen/Qwen2.5-3B-Instruct,fast,post,17.5000,17.0000,17.0000,0.971429,1.000000,0.334113,0.000000,0.000000,2500.00,0.665887

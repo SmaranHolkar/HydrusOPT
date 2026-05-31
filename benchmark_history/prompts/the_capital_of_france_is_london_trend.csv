@@ -1,0 +1,6 @@
+timestamp,prompt,prompt_type,model,profile,guard_mode,baseline_tok_per_sec,linearised_tok_per_sec,hydrus_tok_per_sec,speedup,consistent,mean_entropy,retrieved_rate,fallback_rate,avg_text_len,accuracy_proxy
+2026-05-29T21:17:05+00:00,the capital of france is london,factual,Qwen/Qwen2-1.5B-Instruct,eval,token,28.7000,29.9000,29.9000,1.041812,0.000000,0.073023,0.000000,0.000000,15.50,0.463489
+2026-05-29T21:17:56+00:00,the capital of france is london,factual,Qwen/Qwen2-1.5B-Instruct,eval,token,26.2000,26.4000,26.4000,1.007634,1.000000,0.075109,0.000000,0.000000,15.00,0.924891
+2026-05-29T21:20:55+00:00,the capital of france is london,factual,Qwen/Qwen2-1.5B-Instruct,eval,token,21.8000,21.9000,21.9000,1.004587,1.000000,0.075109,1.000000,0.000000,118.00,0.924891
+2026-05-29T21:23:01+00:00,the capital of france is london,factual,Qwen/Qwen2-1.5B-Instruct,eval,token,20.8000,21.3000,21.3000,1.024038,1.000000,0.075055,1.000000,0.000000,123.00,0.924945
+2026-05-29T21:24:25+00:00,the capital of france is london,factual,Qwen/Qwen2-1.5B-Instruct,eval,token,25.2000,24.5000,24.5000,0.972222,1.000000,0.075109,1.000000,0.000000,104.00,0.924891

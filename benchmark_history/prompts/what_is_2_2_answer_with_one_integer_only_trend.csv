@@ -1,0 +1,7 @@
+timestamp,prompt,prompt_type,model,profile,guard_mode,baseline_tok_per_sec,linearised_tok_per_sec,hydrus_tok_per_sec,speedup,consistent,mean_entropy,retrieved_rate,fallback_rate,avg_text_len,accuracy_proxy
+2026-05-31T12:22:29+00:00,What is 2+2? Answer with one integer only.,definition,Qwen/Qwen2-1.5B-Instruct,fast,post,23.2000,23.7000,23.7000,1.021552,1.000000,0.442510,0.000000,1.000000,159.00,0.557490
+2026-05-31T14:10:20+00:00,What is 2+2? Answer with one integer only.,definition,Qwen/Qwen2.5-3B-Instruct,safe,post,17.8000,17.7000,17.7000,0.994382,1.000000,0.000073,0.000000,0.000000,1.00,0.999927
+2026-05-31T14:38:41+00:00,What is 2+2? Answer with one integer only.,definition,Qwen/Qwen2.5-3B-Instruct,safe,post,17.5000,17.2000,17.2000,0.982857,1.000000,0.000073,0.000000,0.000000,1.00,0.999927
+2026-05-31T15:54:27+00:00,What is 2+2? Answer with one integer only.,definition,Qwen/Qwen2.5-3B-Instruct,safe,post,14.3000,14.2000,14.2000,0.993007,1.000000,1.000000,1.000000,0.000000,209.00,0.000000
+2026-05-31T15:58:33+00:00,What is 2+2? Answer with one integer only.,definition,Qwen/Qwen2.5-3B-Instruct,safe,post,16.3000,16.3000,16.3000,1.000000,1.000000,1.000000,0.000000,0.000000,1.00,0.000000
+2026-05-31T17:42:20+00:00,What is 2+2? Answer with one integer only.,definition,Qwen/Qwen2.5-3B-Instruct,safe,post,15.8000,15.4000,15.4000,0.974684,1.000000,1.000000,0.000000,0.000000,1.00,0.000000

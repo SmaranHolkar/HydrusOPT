@@ -1,0 +1,19 @@
+# Model weights (can be re-downloaded via HuggingFace)
+models/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# VS Code
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store

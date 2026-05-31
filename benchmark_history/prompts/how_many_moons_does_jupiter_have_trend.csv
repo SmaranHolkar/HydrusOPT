@@ -1,0 +1,4 @@
+timestamp,prompt,prompt_type,model,profile,guard_mode,baseline_tok_per_sec,linearised_tok_per_sec,hydrus_tok_per_sec,speedup,consistent,mean_entropy,retrieved_rate,fallback_rate,avg_text_len,accuracy_proxy
+2026-05-31T11:54:36+00:00,how many moons does jupiter have,factual,Qwen/Qwen2-1.5B-Instruct,fast,post,24.9000,24.2000,24.2000,0.971888,1.000000,0.238410,0.000000,1.000000,197.00,0.761590
+2026-05-31T12:11:19+00:00,how many moons does jupiter have,factual,Qwen/Qwen2-1.5B-Instruct,safe,post,20.9000,19.4000,19.4000,0.928230,1.000000,0.202185,0.000000,1.000000,170.00,0.797815
+2026-05-31T12:16:04+00:00,how many moons does jupiter have,factual,Qwen/Qwen2-1.5B-Instruct,fast,post,26.0000,26.4000,26.4000,1.015385,1.000000,0.238410,0.000000,1.000000,170.00,0.761590

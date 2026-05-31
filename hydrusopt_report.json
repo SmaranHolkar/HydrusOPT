@@ -1,0 +1,136 @@
+{
+  "baseline": {
+    "label": "Baseline",
+    "runs": [
+      {
+        "prompt": "What is 2+2? Answer with one integer only.",
+        "tok_per_sec": 13.5,
+        "time_sec": 0.222,
+        "output": " 4"
+      },
+      {
+        "prompt": "What is the capital of France?",
+        "tok_per_sec": 17.5,
+        "time_sec": 2.289,
+        "output": " The capital of France is Paris. \n\nParis is a city located in the northern part of France, and it is known for its rich history, culture, art, fashion, and cuisine. It is"
+      },
+      {
+        "prompt": "What were the main causes of World War 1?",
+        "tok_per_sec": 17.9,
+        "time_sec": 2.231,
+        "output": " The main causes of World War 1 can be attributed to a combination of political, economic, and social factors. Here are some of the key reasons:\n\n1. Imperialism: European powers vied"
+      }
+    ],
+    "errors": [],
+    "avg_tok_per_sec": 17.5,
+    "total_time_sec": 4.741
+  },
+  "linearised_only": {
+    "label": "Compiled",
+    "runs": [
+      {
+        "prompt": "What is 2+2? Answer with one integer only.",
+        "tok_per_sec": 15.5,
+        "time_sec": 0.193,
+        "output": " 4"
+      },
+      {
+        "prompt": "What is the capital of France?",
+        "tok_per_sec": 17.5,
+        "time_sec": 2.292,
+        "output": " The capital of France is Paris. \n\nParis is a city located in the northern part of France, and it is known for its rich history, culture, art, fashion, and cuisine. It is"
+      },
+      {
+        "prompt": "What were the main causes of World War 1?",
+        "tok_per_sec": 16.7,
+        "time_sec": 2.39,
+        "output": " The main causes of World War 1 can be attributed to a combination of political, economic, and social factors. Here are some of the key reasons:\n\n1. Imperialism: European powers vied"
+      }
+    ],
+    "errors": [],
+    "avg_tok_per_sec": 17.0,
+    "total_time_sec": 4.875
+  },
+  "full_stack": {
+    "label": "Compiled",
+    "runs": [
+      {
+        "prompt": "What is 2+2? Answer with one integer only.",
+        "tok_per_sec": 15.5,
+        "time_sec": 0.193,
+        "output": " 4"
+      },
+      {
+        "prompt": "What is the capital of France?",
+        "tok_per_sec": 17.5,
+        "time_sec": 2.292,
+        "output": " The capital of France is Paris. \n\nParis is a city located in the northern part of France, and it is known for its rich history, culture, art, fashion, and cuisine. It is"
+      },
+      {
+        "prompt": "What were the main causes of World War 1?",
+        "tok_per_sec": 16.7,
+        "time_sec": 2.39,
+        "output": " The main causes of World War 1 can be attributed to a combination of political, economic, and social factors. Here are some of the key reasons:\n\n1. Imperialism: European powers vied"
+      }
+    ],
+    "errors": [],
+    "avg_tok_per_sec": 17.0,
+    "total_time_sec": 4.875
+  },
+  "speedup_linearisation_only": 0.97,
+  "speedup_full_stack": 0.97,
+  "layers_linearised": [],
+  "quant_map": {
+    "0": "INT4/8 (BitsAndBytes)",
+    "1": "INT4/8 (BitsAndBytes)",
+    "2": "INT4/8 (BitsAndBytes)",
+    "3": "INT4/8 (BitsAndBytes)",
+    "4": "INT4/8 (BitsAndBytes)",
+    "5": "INT4/8 (BitsAndBytes)",
+    "6": "INT4/8 (BitsAndBytes)",
+    "7": "INT4/8 (BitsAndBytes)",
+    "8": "INT4/8 (BitsAndBytes)",
+    "9": "INT4/8 (BitsAndBytes)",
+    "10": "INT4/8 (BitsAndBytes)",
+    "11": "INT4/8 (BitsAndBytes)",
+    "12": "INT4/8 (BitsAndBytes)",
+    "13": "INT4/8 (BitsAndBytes)",
+    "14": "INT4/8 (BitsAndBytes)",
+    "15": "INT4/8 (BitsAndBytes)",
+    "16": "INT4/8 (BitsAndBytes)",
+    "17": "INT4/8 (BitsAndBytes)",
+    "18": "INT4/8 (BitsAndBytes)",
+    "19": "INT4/8 (BitsAndBytes)",
+    "20": "INT4/8 (BitsAndBytes)",
+    "21": "INT4/8 (BitsAndBytes)",
+    "22": "INT4/8 (BitsAndBytes)",
+    "23": "INT4/8 (BitsAndBytes)",
+    "24": "INT4/8 (BitsAndBytes)",
+    "25": "INT4/8 (BitsAndBytes)",
+    "26": "INT4/8 (BitsAndBytes)",
+    "27": "INT4/8 (BitsAndBytes)",
+    "28": "INT4/8 (BitsAndBytes)",
+    "29": "INT4/8 (BitsAndBytes)",
+    "30": "INT4/8 (BitsAndBytes)",
+    "31": "INT4/8 (BitsAndBytes)",
+    "32": "INT4/8 (BitsAndBytes)",
+    "33": "INT4/8 (BitsAndBytes)",
+    "34": "INT4/8 (BitsAndBytes)",
+    "35": "INT4/8 (BitsAndBytes)"
+  },
+  "investor_summary": {
+    "performance_mode": {
+      "label": "HydrusOpt (performance)",
+      "tok_per_sec": 17.0,
+      "delta_vs_baseline_pct": -2.86
+    },
+    "reliability_mode": {
+      "label": "HydrusOpt (reliability)",
+      "baseline_latency_per_answer_s": 4.571,
+      "verified_latency_per_answer_s": 0.863,
+      "safety_tax_pct": -81.1
+    },
+    "safety_tax_pct": -81.1,
+    "safety_tax_narrative": "HydrusOpt adds -81% latency per answer for hallucination-proof cognitive verification."
+  }
+}

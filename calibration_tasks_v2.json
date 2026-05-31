@@ -1,0 +1,38 @@
+[
+  {
+    "prompt": "How many moons does Jupiter have?",
+    "answer": "115",
+    "validator": "numeric",
+    "options": {"tolerance": 0}
+  },
+  {
+    "prompt": "What is the largest moon of Jupiter?",
+    "answer": "Ganymede",
+    "validator": "one_of",
+    "options": {"answers": ["Jupiter's largest moon is Ganymede", "The largest moon is Ganymede"]}
+  },
+  {
+    "prompt": "Name one Galilean moon of Jupiter.",
+    "answer": "Io",
+    "validator": "one_of",
+    "options": {"answers": ["Europa", "Ganymede", "Callisto"]}
+  },
+  {
+    "prompt": "Does Jupiter have rings?",
+    "answer": "Yes",
+    "validator": "regex",
+    "options": {"pattern": "(?i)\\b(yes|jupiter has rings|jupiter does have rings|it has rings)\\b"}
+  },
+  {
+    "prompt": "Jupiter is the how many-th planet from the Sun?",
+    "answer": "fifth",
+    "validator": "one_of",
+    "options": {"answers": ["5", "the fifth planet", "fifth"]}
+  },
+  {
+    "prompt": "What is Jupiter mostly made of?",
+    "answer": "hydrogen",
+    "validator": "one_of",
+    "options": {"answers": ["mostly hydrogen", "hydrogen and helium"]}
+  }
+]

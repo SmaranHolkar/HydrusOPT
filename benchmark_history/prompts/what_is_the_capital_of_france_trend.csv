@@ -1,0 +1,5 @@
+timestamp,prompt,prompt_type,model,profile,guard_mode,baseline_tok_per_sec,linearised_tok_per_sec,hydrus_tok_per_sec,speedup,consistent,mean_entropy,retrieved_rate,fallback_rate,avg_text_len,accuracy_proxy
+2026-05-31T15:37:32+00:00,What is the capital of France?,definition,Qwen/Qwen2.5-3B-Instruct,safe,post,16.4000,16.2000,16.2000,0.987805,1.000000,0.418347,0.000000,0.000000,99.00,0.581653
+2026-05-31T15:50:10+00:00,What is the capital of France?,definition,Qwen/Qwen2.5-3B-Instruct,safe,post,14.9000,15.0000,15.0000,1.006711,1.000000,0.270318,1.000000,0.000000,104.00,0.729682
+2026-05-31T16:00:51+00:00,What is the capital of France?,definition,Qwen/Qwen2.5-3B-Instruct,safe,post,15.4000,15.5000,15.5000,1.006494,1.000000,0.270318,1.000000,0.000000,104.00,0.729682
+2026-05-31T16:03:40+00:00,What is the capital of France?,definition,Qwen/Qwen2.5-3B-Instruct,safe,post,16.1000,16.5000,16.5000,1.024845,1.000000,0.270318,1.000000,0.000000,104.00,0.729682

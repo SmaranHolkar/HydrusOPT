@@ -1,0 +1,4 @@
+timestamp,prompt,prompt_type,model,profile,guard_mode,baseline_tok_per_sec,linearised_tok_per_sec,hydrus_tok_per_sec,speedup,consistent,mean_entropy,retrieved_rate,fallback_rate,avg_text_len,accuracy_proxy
+2026-05-31T20:45:50+00:00,"If all cats are dogs and all dogs are fish, what is a cat?",definition,Qwen/Qwen2.5-3B-Instruct,fast,post,16.2000,14.7000,14.7000,0.907407,1.000000,0.178747,0.000000,0.000000,1369.00,0.821253
+2026-05-31T20:48:20+00:00,"If all cats are dogs and all dogs are fish, what is a cat?",definition,Qwen/Qwen2.5-3B-Instruct,fast,post,12.8000,14.1000,14.1000,1.101562,1.000000,0.178747,0.000000,0.000000,1369.00,0.821253
+2026-05-31T20:51:35+00:00,"If all cats are dogs and all dogs are fish, what is a cat?",definition,Qwen/Qwen2.5-3B-Instruct,fast,post,15.7000,15.8000,15.8000,1.006369,1.000000,0.178747,0.000000,0.000000,1369.00,0.821253
