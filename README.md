@@ -122,3 +122,9 @@ calibration_tasks.json  # Example calibration task definitions
 - `models/` is excluded from git — weights are re-downloaded automatically via Hugging Face
 - Report JSON files (e.g. `hydrus_cybernetic_report_latest.json`) are saved after each run
 - The system prompt instructs the model not to add hashtags or social media formatting
+
+---
+
+## License
+
+This project is licensed under the Apache License 2.0. See `/tmp/workspace/SmaranHolkar/HydrusOPT/LICENSE` for details.
