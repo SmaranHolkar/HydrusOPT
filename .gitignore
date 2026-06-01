@@ -17,3 +17,10 @@ env/
 # OS
 Thumbs.db
 .DS_Store
+
+# Generated artifacts (HTML previews)
+artifacts/
+
+# Reports (live output, not source)
+hydrusopt_report.json
+reports/

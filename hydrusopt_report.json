@@ -4,81 +4,81 @@
     "runs": [
       {
         "prompt": "What is 2+2? Answer with one integer only.",
-        "tok_per_sec": 13.5,
-        "time_sec": 0.222,
+        "tok_per_sec": 15.3,
+        "time_sec": 0.195,
         "output": " 4"
       },
       {
         "prompt": "What is the capital of France?",
-        "tok_per_sec": 17.5,
-        "time_sec": 2.289,
+        "tok_per_sec": 17.9,
+        "time_sec": 2.234,
         "output": " The capital of France is Paris. \n\nParis is a city located in the northern part of France, and it is known for its rich history, culture, art, fashion, and cuisine. It is"
       },
       {
         "prompt": "What were the main causes of World War 1?",
         "tok_per_sec": 17.9,
-        "time_sec": 2.231,
+        "time_sec": 2.229,
         "output": " The main causes of World War 1 can be attributed to a combination of political, economic, and social factors. Here are some of the key reasons:\n\n1. Imperialism: European powers vied"
       }
     ],
     "errors": [],
-    "avg_tok_per_sec": 17.5,
-    "total_time_sec": 4.741
+    "avg_tok_per_sec": 17.8,
+    "total_time_sec": 4.659
   },
   "linearised_only": {
     "label": "Compiled",
     "runs": [
       {
         "prompt": "What is 2+2? Answer with one integer only.",
-        "tok_per_sec": 15.5,
-        "time_sec": 0.193,
+        "tok_per_sec": 13.3,
+        "time_sec": 0.226,
         "output": " 4"
       },
       {
         "prompt": "What is the capital of France?",
-        "tok_per_sec": 17.5,
-        "time_sec": 2.292,
+        "tok_per_sec": 17.8,
+        "time_sec": 2.251,
         "output": " The capital of France is Paris. \n\nParis is a city located in the northern part of France, and it is known for its rich history, culture, art, fashion, and cuisine. It is"
       },
       {
         "prompt": "What were the main causes of World War 1?",
-        "tok_per_sec": 16.7,
-        "time_sec": 2.39,
+        "tok_per_sec": 18.2,
+        "time_sec": 2.194,
         "output": " The main causes of World War 1 can be attributed to a combination of political, economic, and social factors. Here are some of the key reasons:\n\n1. Imperialism: European powers vied"
       }
     ],
     "errors": [],
-    "avg_tok_per_sec": 17.0,
-    "total_time_sec": 4.875
+    "avg_tok_per_sec": 17.8,
+    "total_time_sec": 4.671
   },
   "full_stack": {
     "label": "Compiled",
     "runs": [
       {
         "prompt": "What is 2+2? Answer with one integer only.",
-        "tok_per_sec": 15.5,
-        "time_sec": 0.193,
+        "tok_per_sec": 13.3,
+        "time_sec": 0.226,
         "output": " 4"
       },
       {
         "prompt": "What is the capital of France?",
-        "tok_per_sec": 17.5,
-        "time_sec": 2.292,
+        "tok_per_sec": 17.8,
+        "time_sec": 2.251,
         "output": " The capital of France is Paris. \n\nParis is a city located in the northern part of France, and it is known for its rich history, culture, art, fashion, and cuisine. It is"
       },
       {
         "prompt": "What were the main causes of World War 1?",
-        "tok_per_sec": 16.7,
-        "time_sec": 2.39,
+        "tok_per_sec": 18.2,
+        "time_sec": 2.194,
         "output": " The main causes of World War 1 can be attributed to a combination of political, economic, and social factors. Here are some of the key reasons:\n\n1. Imperialism: European powers vied"
       }
     ],
     "errors": [],
-    "avg_tok_per_sec": 17.0,
-    "total_time_sec": 4.875
+    "avg_tok_per_sec": 17.8,
+    "total_time_sec": 4.671
   },
-  "speedup_linearisation_only": 0.97,
-  "speedup_full_stack": 0.97,
+  "speedup_linearisation_only": 1.0,
+  "speedup_full_stack": 1.0,
   "layers_linearised": [],
   "quant_map": {
     "0": "INT4/8 (BitsAndBytes)",
@@ -121,16 +121,16 @@
   "investor_summary": {
     "performance_mode": {
       "label": "HydrusOpt (performance)",
-      "tok_per_sec": 17.0,
-      "delta_vs_baseline_pct": -2.86
+      "tok_per_sec": 17.8,
+      "delta_vs_baseline_pct": 0.0
     },
     "reliability_mode": {
       "label": "HydrusOpt (reliability)",
-      "baseline_latency_per_answer_s": 4.571,
-      "verified_latency_per_answer_s": 0.863,
-      "safety_tax_pct": -81.1
+      "baseline_latency_per_answer_s": 1.124,
+      "verified_latency_per_answer_s": 1.124,
+      "safety_tax_pct": 0.0
     },
-    "safety_tax_pct": -81.1,
-    "safety_tax_narrative": "HydrusOpt adds -81% latency per answer for hallucination-proof cognitive verification."
+    "safety_tax_pct": 0.0,
+    "safety_tax_narrative": "HydrusOpt adds 0% latency per answer for hallucination-proof cognitive verification."
   }
 }

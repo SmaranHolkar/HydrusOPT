@@ -47,3 +47,6 @@ timestamp,model,profile,guard_mode,baseline_tok_per_sec,linearised_tok_per_sec,h
 2026-05-31T20:56:15+00:00,Qwen/Qwen2.5-3B-Instruct,fast,post,14.5000,15.0000,15.0000,1.034483,0.000000,0,0
 2026-05-31T21:17:31+00:00,Qwen/Qwen2.5-3B-Instruct,fast,post,0.0000,0.0000,0.0000,0.000000,0.000000,0,0
 2026-05-31T21:22:55+00:00,Qwen/Qwen2.5-3B-Instruct,fast,post,17.5000,17.0000,17.0000,0.971429,0.000000,0,0
+2026-06-01T10:02:58+00:00,Qwen/Qwen2.5-3B-Instruct,fast,post,17.5000,17.5000,17.5000,1.000000,0.000000,0,0
+2026-06-01T10:08:02+00:00,Qwen/Qwen2.5-3B-Instruct,eval,post,21.7000,22.0000,22.0000,1.013825,0.000000,0,1
+2026-06-01T10:19:24+00:00,Qwen/Qwen2.5-3B-Instruct,fast,post,17.8000,17.8000,17.8000,1.000000,0.000000,0,0

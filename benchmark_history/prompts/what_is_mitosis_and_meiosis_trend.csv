@@ -1,2 +1,5 @@
 timestamp,prompt,prompt_type,model,profile,guard_mode,baseline_tok_per_sec,linearised_tok_per_sec,hydrus_tok_per_sec,speedup,consistent,mean_entropy,retrieved_rate,fallback_rate,avg_text_len,accuracy_proxy
 2026-05-31T21:17:31+00:00,What is mitosis and meiosis?,definition,Qwen/Qwen2.5-3B-Instruct,fast,post,0.0000,0.0000,0.0000,0.000000,1.000000,0.174807,0.000000,0.000000,1274.00,0.825193
+2026-06-01T10:02:58+00:00,What is mitosis and meiosis?,definition,Qwen/Qwen2.5-3B-Instruct,fast,post,17.5000,17.5000,17.5000,1.000000,1.000000,0.174807,0.000000,0.000000,1274.00,0.825193
+2026-06-01T10:08:03+00:00,What is mitosis and meiosis?,definition,Qwen/Qwen2.5-3B-Instruct,eval,post,21.7000,22.0000,22.0000,1.013825,1.000000,0.174807,0.000000,0.000000,1274.00,0.825193
+2026-06-01T10:19:24+00:00,What is mitosis and meiosis?,definition,Qwen/Qwen2.5-3B-Instruct,fast,post,17.8000,17.8000,17.8000,1.000000,1.000000,0.174807,0.000000,0.000000,1274.00,0.825193
