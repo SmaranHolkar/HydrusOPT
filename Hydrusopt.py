@@ -58,6 +58,10 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
+import ast
+import html as _html_module
+import operator as _operator_module
+import webbrowser
 import torch
 import torch.nn as nn
 import time
@@ -67,7 +71,7 @@ import json
 import os
 from urllib import parse, request
 from urllib.error import URLError, HTTPError
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict, Any, Callable
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -1394,7 +1398,7 @@ def generate_cognitive(
     # 1. Format inputs
     if use_chat_template and hasattr(tokenizer, "apply_chat_template"):
         messages = [
-            {"role": "system", "content": "You are a helpful assistant. Give concise, direct answers."},
+            {"role": "system", "content": "You are a helpful assistant. Give concise, direct answers. Do not add hashtags or social media formatting unless explicitly asked."},
             {"role": "user", "content": prompt}
         ]
         try:
@@ -1624,7 +1628,7 @@ def generate_with_meta(
     plugin.reset()
     plugin.set_prompt(prompt)
 
-    system_msg = "You are a helpful assistant. Give concise, direct answers."
+    system_msg = "You are a helpful assistant. Give concise, direct answers. Do not add hashtags or social media formatting unless explicitly asked."
 
     # ── Build input ────────────────────────────────────────────────
     if use_chat_template and hasattr(tokenizer, "apply_chat_template"):
@@ -1778,7 +1782,7 @@ def generate_with_post_guard(
     This preserves model output quality better than per-token intervention while still
     blocking low-confidence or non-answer responses.
     """
-    system_msg = "You are a helpful assistant. Give concise, direct answers."
+    system_msg = "You are a helpful assistant. Give concise, direct answers. Do not add hashtags or social media formatting unless explicitly asked."
 
     if use_chat_template and hasattr(tokenizer, "apply_chat_template"):
         messages = [
@@ -2216,6 +2220,594 @@ def retrieve_wikipedia_summary(prompt: str, timeout_sec: int = 6) -> Tuple[bool,
         return False, ""
 
 
+# ═══════════════════════════════════════════════════════════════
+# RESEARCH MODE  — multi-source retrieval + metacognition eval
+# ═══════════════════════════════════════════════════════════════
+#
+# Sources (all free, no API key required):
+#   • arXiv          — science, CS, math, physics, biology
+#   • PubMed/NCBI    — biomedical and clinical research
+#   • Semantic Scholar — cross-domain academic papers
+#
+# Flow:
+#   1. Fetch top-N snippets from each enabled source in parallel
+#   2. Rank by relevance (title/abstract keyword overlap)
+#   3. Inject ranked context into the model prompt
+#   4. Generate answer grounded to sources (generate_with_post_guard)
+#   5. Run a lightweight eval pass: ask the model "Is this claim
+#      supported by the sources?" — confidence below threshold
+#      flags the answer as unverified
+# ───────────────────────────────────────────────────────────────
+
+import xml.etree.ElementTree as _ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+_RESEARCH_UA = "HydrusOpt/1.0 (research-mode; contact: local)"
+_RESEARCH_TIMEOUT = 8   # seconds per HTTP call
+
+
+def _http_get_json(url: str, headers: Optional[Dict] = None) -> Optional[Dict]:
+    h = {"User-Agent": _RESEARCH_UA}
+    if headers:
+        h.update(headers)
+    try:
+        req = request.Request(url, headers=h)
+        with request.urlopen(req, timeout=_RESEARCH_TIMEOUT) as resp:
+            return json.loads(resp.read().decode("utf-8", errors="ignore"))
+    except Exception:
+        return None
+
+
+def _http_get_text(url: str) -> Optional[str]:
+    try:
+        req = request.Request(url, headers={"User-Agent": _RESEARCH_UA})
+        with request.urlopen(req, timeout=_RESEARCH_TIMEOUT) as resp:
+            return resp.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+
+
+# ── Query normaliser ──────────────────────────────────────────
+_QUERY_STRIP = {
+    "how", "what", "why", "when", "where", "who", "which", "does", "do",
+    "is", "are", "was", "were", "can", "could", "should", "would", "will",
+    "the", "a", "an", "to", "for", "of", "in", "on", "at", "by", "with",
+    "and", "or", "but", "more", "most", "best", "good", "some", "any",
+    "i", "me", "my", "you", "your", "we", "us", "it", "its",
+}
+
+def _normalize_query(query: str) -> str:
+    """
+    Extract meaningful keywords from a conversational query.
+    Strips question words, stop words, and short tokens so APIs receive
+    clean keyword terms rather than full sentences.
+    """
+    # Remove punctuation except hyphens, lower-case
+    cleaned = re.sub(r"[^\w\s\-]", " ", query.lower())
+    tokens = [t for t in cleaned.split() if len(t) > 2 and t not in _QUERY_STRIP]
+    return " ".join(tokens) if tokens else query.lower()
+
+
+# ── arXiv (Atom feed, stdlib xml) ─────────────────────────────
+def _fetch_arxiv(query: str, max_results: int = 3) -> List[Dict[str, str]]:
+    params = parse.urlencode({
+        "search_query": f"all:{query}",
+        "max_results": max_results,
+        "sortBy": "relevance",
+        "sortOrder": "descending",
+    })
+    url = f"http://export.arxiv.org/api/query?{params}"
+    raw = _http_get_text(url)
+    if not raw:
+        return []
+    results = []
+    try:
+        ns = {"a": "http://www.w3.org/2005/Atom"}
+        root = _ET.fromstring(raw)
+        for entry in root.findall("a:entry", ns):
+            title = (entry.findtext("a:title", "", ns) or "").strip().replace("\n", " ")
+            summary = (entry.findtext("a:summary", "", ns) or "").strip().replace("\n", " ")
+            link_el = entry.find("a:id", ns)
+            link = (link_el.text or "").strip() if link_el is not None else ""
+            if title and summary:
+                results.append({
+                    "source": "arXiv",
+                    "title": title,
+                    "snippet": summary[:350],
+                    "url": link,
+                })
+    except Exception:
+        pass
+    return results
+
+
+# ── PubMed / NCBI E-utilities ─────────────────────────────────
+def _fetch_pubmed(query: str, max_results: int = 3) -> List[Dict[str, str]]:
+    search_params = parse.urlencode({
+        "db": "pubmed",
+        "retmode": "json",
+        "retmax": max_results,
+        "term": query,
+    })
+    search_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?{search_params}"
+    data = _http_get_json(search_url)
+    if not data:
+        return []
+    ids = data.get("esearchresult", {}).get("idlist", [])
+    if not ids:
+        return []
+    # Fetch summaries for returned IDs
+    fetch_params = parse.urlencode({
+        "db": "pubmed",
+        "retmode": "json",
+        "rettype": "abstract",
+        "id": ",".join(ids[:max_results]),
+    })
+    fetch_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?{fetch_params}"
+    summary_data = _http_get_json(fetch_url)
+    if not summary_data:
+        return []
+    results = []
+    uids = summary_data.get("result", {}).get("uids", [])
+    for uid in uids:
+        rec = summary_data["result"].get(uid, {})
+        title = rec.get("title", "").strip()
+        source_journal = rec.get("source", "")
+        pub_date = rec.get("pubdate", "")
+        if title:
+            results.append({
+                "source": "PubMed",
+                "title": title,
+                "snippet": f"{source_journal} ({pub_date})" if source_journal else pub_date,
+                "url": f"https://pubmed.ncbi.nlm.nih.gov/{uid}/",
+            })
+    return results
+
+
+# ── Semantic Scholar ──────────────────────────────────────────
+def _fetch_semantic_scholar(query: str, max_results: int = 3) -> List[Dict[str, str]]:
+    params = parse.urlencode({
+        "query": query,
+        "limit": max_results,
+        "fields": "title,abstract,year,authors",
+    })
+    url = f"https://api.semanticscholar.org/graph/v1/paper/search?{params}"
+    data = _http_get_json(url, headers={"x-api-key": ""})  # public tier, no key required
+    if not data:
+        return []
+    results = []
+    for paper in data.get("data", []):
+        title = (paper.get("title") or "").strip()
+        abstract = (paper.get("abstract") or "").strip()
+        year = paper.get("year", "")
+        paper_id = paper.get("paperId", "")
+        if title:
+            snippet = abstract[:350] if abstract else f"Published {year}"
+            results.append({
+                "source": "Semantic Scholar",
+                "title": title,
+                "snippet": snippet,
+                "url": f"https://www.semanticscholar.org/paper/{paper_id}" if paper_id else "",
+            })
+    return results
+
+
+# ── Ranker ────────────────────────────────────────────────────
+def _score_result(result: Dict[str, str], query_tokens: set) -> float:
+    """
+    Word-boundary keyword overlap score over title + snippet.
+    Uses \\b boundaries so 'diet' does not match 'dietary' or 'Diet Your LLM'
+    when the surrounding context is unrelated.
+    Title matches are weighted 2× over snippet matches.
+    """
+    title  = result.get("title",   "").lower()
+    snippet = result.get("snippet", "").lower()
+    score = 0.0
+    for tok in query_tokens:
+        pattern = r"\b" + re.escape(tok) + r"\b"
+        if re.search(pattern, title):
+            score += 2.0   # title hit worth more
+        elif re.search(pattern, snippet):
+            score += 1.0
+    # Normalise: max possible = 2 * len(tokens) (all in title)
+    return score / max(2 * len(query_tokens), 1)
+
+
+# ── Domain router ─────────────────────────────────────────────
+_HEALTH_TERMS = {
+    "weight", "loss", "diet", "nutrition", "obesity", "diabetes", "cancer",
+    "disease", "clinical", "patient", "treatment", "therapy", "drug", "vaccine",
+    "symptom", "diagnosis", "exercise", "sleep", "mental", "health", "medical",
+    "hospital", "surgery", "vitamin", "protein", "calorie", "cholesterol",
+    "blood", "heart", "brain", "muscle", "bone", "immune", "stress", "anxiety",
+    "depression", "alzheimer", "dementia", "covid", "infection", "bacteria", "virus",
+}
+_CS_TERMS = {
+    "neural", "network", "transformer", "attention", "algorithm", "machine",
+    "learning", "model", "llm", "gpu", "cuda", "compiler", "optimization",
+    "gradient", "backpropagation", "dataset", "benchmark", "inference", "training",
+    "quantum", "cryptography", "blockchain", "compiler", "kernel", "latency",
+}
+
+def _detect_domain(query_tokens: set) -> str:
+    """Return 'health', 'cs', or 'general' based on query keywords."""
+    health_hits = len(query_tokens & _HEALTH_TERMS)
+    cs_hits     = len(query_tokens & _CS_TERMS)
+    if health_hits > cs_hits and health_hits >= 1:
+        return "health"
+    if cs_hits > health_hits and cs_hits >= 1:
+        return "cs"
+    return "general"
+
+
+class ResearchRetriever:
+    """
+    Parallel multi-source retriever. Returns ranked snippets ready for
+    injection as model context.
+
+    Enabled sources: "arxiv", "pubmed", "semanticscholar" (any combination).
+    """
+
+    _SOURCE_MAP: Dict[str, Any] = {
+        "arxiv":           _fetch_arxiv,
+        "pubmed":          _fetch_pubmed,
+        "semanticscholar": _fetch_semantic_scholar,
+    }
+
+    def __init__(
+        self,
+        sources: Optional[List[str]] = None,
+        max_results_per_source: int = 3,
+        auto_route: bool = True,
+    ) -> None:
+        self.auto_route = auto_route
+        if sources is None:
+            sources = ["arxiv", "semanticscholar"]
+        self.sources = [s.lower() for s in sources if s.lower() in self._SOURCE_MAP]
+        self.max_results_per_source = max_results_per_source
+
+    def fetch(self, query: str, min_relevance: float = 0.20) -> List[Dict[str, str]]:
+        """
+        Fetch from all enabled sources in parallel, filter by minimum relevance
+        score (word-boundary matched), rank, and return.
+        Domain routing: health queries automatically promote pubmed and filter
+        arXiv CS/ML false-positives.
+        """
+        api_query = _normalize_query(query)
+        query_tokens = set(re.findall(r"\w+", api_query.lower())) - _QUERY_STRIP
+        domain = _detect_domain(query_tokens)
+
+        # Build effective source list — auto-promote best source per domain
+        effective_sources = list(self.sources)
+        if self.auto_route and domain == "health":
+            if "pubmed" not in effective_sources:
+                effective_sources.insert(0, "pubmed")
+                print(f"  [RESEARCH] Health query detected — added pubmed automatically")
+            effective_sources = ["pubmed"] + [s for s in effective_sources if s != "pubmed"]
+        elif self.auto_route and domain == "cs":
+            if "arxiv" not in effective_sources:
+                effective_sources.insert(0, "arxiv")
+                print(f"  [RESEARCH] CS/ML query detected — added arxiv automatically")
+
+        def _run(q: str, src_list: list) -> Dict[str, int]:
+            nonlocal all_results
+            source_counts: Dict[str, int] = {src: 0 for src in src_list}
+            with ThreadPoolExecutor(max_workers=max(len(src_list), 1)) as pool:
+                futures = {
+                    pool.submit(
+                        self._SOURCE_MAP[src], q, self.max_results_per_source
+                    ): src
+                    for src in src_list
+                    if src in self._SOURCE_MAP
+                }
+                for fut in as_completed(futures):
+                    src = futures[fut]
+                    try:
+                        res = fut.result()
+                        source_counts[src] = len(res)
+                        all_results.extend(res)
+                    except Exception:
+                        source_counts[src] = -1
+            return source_counts
+
+        all_results: List[Dict[str, str]] = []
+        source_counts = _run(api_query, effective_sources)
+
+        # If every source returned 0, retry with first 3 keywords only
+        if all(v == 0 for v in source_counts.values()):
+            short_query = " ".join(api_query.split()[:3])
+            if short_query and short_query != api_query:
+                print(f"  [RESEARCH] Retrying with shorter query: '{short_query}'")
+                all_results = []
+                source_counts = _run(short_query, effective_sources)
+
+        # Report per-source yield
+        for src, count in source_counts.items():
+            if count == 0:
+                print(f"  [RESEARCH] ⚠ {src}: 0 results (may be rate-limited or unreachable)")
+            elif count == -1:
+                print(f"  [RESEARCH] ⚠ {src}: fetch error")
+
+        # Filter by word-boundary relevance
+        if query_tokens:
+            all_results = [
+                r for r in all_results
+                if _score_result(r, query_tokens) >= min_relevance
+            ]
+
+        # For health queries, strip arXiv results that lack any health term
+        # (catches CS papers with health-adjacent words in their titles)
+        if domain == "health":
+            def _is_health_result(r: Dict) -> bool:
+                text = (r.get("title", "") + " " + r.get("snippet", "")).lower()
+                return (
+                    r.get("source") != "arXiv"
+                    or any(re.search(r"\b" + re.escape(t) + r"\b", text) for t in _HEALTH_TERMS)
+                )
+            filtered = [r for r in all_results if _is_health_result(r)]
+            if filtered:
+                all_results = filtered
+
+        all_results.sort(key=lambda r: _score_result(r, query_tokens), reverse=True)
+        return all_results
+
+    def format_context(self, results: List[Dict[str, str]], max_chars: int = 1200) -> str:
+        """Format retrieved snippets as a concise context block."""
+        lines = ["[RESEARCH CONTEXT — from peer-reviewed sources]"]
+        budget = max_chars
+        for i, r in enumerate(results, 1):
+            entry = f"[{i}] ({r['source']}) {r['title']}: {r['snippet']}"
+            if len(entry) > budget:
+                entry = entry[:budget]
+            lines.append(entry)
+            budget -= len(entry)
+            if budget <= 0:
+                break
+        return "\n".join(lines)
+
+
+# ── Metacognition eval pass ───────────────────────────────────
+def research_eval_pass(
+    answer: str,
+    context: str,
+    model,
+    tokenizer,
+    confidence_threshold: float = 0.72,
+    max_tokens: int = 60,
+) -> Dict[str, Any]:
+    """
+    Ask the model whether the generated answer is supported by the retrieved
+    sources. Returns a dict with keys: supported (bool), confidence (float),
+    verdict_text (str).
+
+    Uses a dedicated closed-book prompt so the eval is independent of the
+    generation pass — same principle as verify_first_gate.
+    """
+    eval_prompt = (
+        "You are a strict fact-checker. Read the sources and the claim below.\n"
+        "Sources:\n"
+        f"{context}\n\n"
+        f"Claim: {answer}\n\n"
+        "Is the claim fully supported by the sources above? "
+        "Reply with YES or NO on the first line, then one sentence of justification."
+    )
+
+    if hasattr(tokenizer, "apply_chat_template"):
+        try:
+            formatted = tokenizer.apply_chat_template(
+                [{"role": "user", "content": eval_prompt}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception:
+            formatted = eval_prompt
+    else:
+        formatted = eval_prompt
+
+    inputs = tokenizer(formatted, return_tensors="pt").to(model.device, non_blocking=True)
+    input_len = inputs["input_ids"].shape[1]
+
+    class _ProbTracker(LogitsProcessor):
+        __slots__ = ("probs",)
+        def __init__(self): self.probs: List[float] = []
+        def __call__(self, iids, scores):
+            self.probs.append(torch.softmax(scores.float(), dim=-1).max(dim=-1).values.item())
+            return scores
+
+    tracker = _ProbTracker()
+    model.eval()
+    with torch.inference_mode():
+        out = model.generate(
+            **inputs,
+            max_new_tokens=max_tokens,
+            do_sample=False,
+            logits_processor=LogitsProcessorList([tracker]),
+            pad_token_id=tokenizer.eos_token_id,
+        )
+    verdict_text = tokenizer.decode(out[0][input_len:], skip_special_tokens=True).strip()
+    avg_conf = sum(tracker.probs) / max(len(tracker.probs), 1)
+    first_line = verdict_text.splitlines()[0].strip().upper() if verdict_text else ""
+    supported = first_line.startswith("YES") and avg_conf >= confidence_threshold
+    return {
+        "supported": supported,
+        "confidence": avg_conf,
+        "verdict_text": verdict_text,
+    }
+
+
+# ── Top-level research answer function ───────────────────────
+def generate_research_answer(
+    query: str,
+    model,
+    tokenizer,
+    retriever: "ResearchRetriever",
+    max_tokens: int = 200,
+    meta_threshold: float = 0.72,
+    run_eval: bool = True,
+    verbose: bool = True,
+) -> Dict[str, Any]:
+    """
+    Full research pipeline:
+      1. Retrieve from reliable sources
+      2. Generate answer grounded to context
+      3. Eval pass to verify claim against sources
+    Returns dict with answer, sources, eval result.
+    """
+    if verbose:
+        print(f"\n  [RESEARCH] Fetching sources for: {query[:80]}")
+
+    results = retriever.fetch(query)
+    if verbose:
+        print(f"  [RESEARCH] {len(results)} result(s) from: "
+              f"{', '.join(sorted({r['source'] for r in results}))}")
+
+    if not results:
+        return {
+            "answer": "No relevant sources found for this query.",
+            "sources": [],
+            "context": "",
+            "eval": {"supported": None, "confidence": 0.0, "verdict_text": "no sources"},
+            "grounded": False,
+        }
+
+    context = retriever.format_context(results)
+
+    # Grounded prompt: model must answer using the provided sources
+    grounded_prompt = (
+        f"{context}\n\n"
+        f"Using only the sources above, answer the following question concisely and accurately:\n"
+        f"Question: {query}"
+    )
+
+    gen_result = generate_with_post_guard(
+        grounded_prompt,
+        model,
+        tokenizer,
+        max_tokens=max_tokens,
+        threshold=meta_threshold,
+        use_chat_template=True,
+        enable_retrieval_fallback=False,  # already have context
+        # Grounded prompts are long — per-token confidence naturally drops on
+        # small models reading a large context block. Accuracy is validated by
+        # the separate eval pass, not the uncertain-ratio trigger here.
+        uncertain_ratio_trigger=0.85,
+    )
+    answer = gen_result["safe_output"]
+
+    eval_result: Dict[str, Any] = {"supported": None, "confidence": 0.0, "verdict_text": "skipped"}
+    if run_eval and not gen_result["blocked"]:
+        if verbose:
+            print("  [RESEARCH] Running metacognition eval pass...")
+        eval_result = research_eval_pass(
+            answer=answer,
+            context=context,
+            model=model,
+            tokenizer=tokenizer,
+            confidence_threshold=meta_threshold,
+        )
+        if verbose:
+            verdict = "✓ SUPPORTED" if eval_result["supported"] else "⚠ UNVERIFIED"
+            print(f"  [RESEARCH] Eval: {verdict} "
+                  f"(conf={eval_result['confidence']:.2%})")
+            if not eval_result["supported"]:
+                print(f"  [RESEARCH] Verdict: {eval_result['verdict_text'][:120]}")
+
+    return {
+        "answer": answer,
+        "sources": results,
+        "context": context,
+        "eval": eval_result,
+        "grounded": not gen_result["blocked"],
+    }
+
+
+def research_chat_loop(
+    model,
+    tokenizer,
+    retriever: "ResearchRetriever",
+    artifact_renderer: "ArtifactRenderer",
+    skill_registry: "SkillRegistry",
+    max_tokens: int = 200,
+    meta_threshold: float = 0.72,
+    run_eval: bool = True,
+    max_history_turns: int = 4,
+) -> None:
+    """Interactive research chat — every query is grounded to live sources."""
+    print("\n" + "=" * 65)
+    print("  HydrusOPT Research Mode")
+    src_names = ", ".join(retriever.sources) if retriever.sources else "none"
+    print(f"  Sources : {src_names}")
+    print(f"  Eval    : {'on (metacognition)' if run_eval else 'off'}")
+    print("  Type 'exit' to quit.")
+    print("=" * 65)
+
+    history: List[Dict[str, str]] = []
+
+    while True:
+        try:
+            user_input = input("\n  You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Bye.")
+            break
+
+        if not user_input:
+            continue
+        if user_input.lower() in ("exit", "quit", "bye"):
+            print("  Bye.")
+            break
+
+        result = generate_research_answer(
+            query=user_input,
+            model=model,
+            tokenizer=tokenizer,
+            retriever=retriever,
+            max_tokens=max_tokens,
+            meta_threshold=meta_threshold,
+            run_eval=run_eval,
+            verbose=True,
+        )
+
+        answer = result["answer"]
+        eval_info = result["eval"]
+
+        # Append eval status indicator
+        if eval_info.get("supported") is True:
+            indicator = "  [✓ source-verified]"
+        elif eval_info.get("supported") is False:
+            indicator = "  [⚠ unverified — treat with caution]"
+        else:
+            indicator = ""
+
+        print(f"\n  HydrusOPT: {answer}")
+        if indicator:
+            print(indicator)
+
+        # Print sources
+        if result["sources"]:
+            print("\n  Sources:")
+            for i, s in enumerate(result["sources"][:3], 1):
+                url = s.get("url", "")
+                print(f"    [{i}] ({s['source']}) {s['title'][:70]}")
+                if url:
+                    print(f"         {url}")
+
+        # Render any code artifacts in the answer
+        art_paths = artifact_renderer.detect_and_render(answer)
+        for p in art_paths:
+            abs_p = os.path.abspath(p)
+            print(f"\n  [ARTIFACT] {abs_p}")
+            try:
+                import webbrowser
+                webbrowser.open(f"file:///{abs_p}")
+            except Exception:
+                pass
+
+        history.append({"role": "user",      "content": user_input})
+        history.append({"role": "assistant", "content": answer})
+        if len(history) > max_history_turns * 2:
+            history = history[-(max_history_turns * 2):]
+
+
 def check_truth_consistency(
     prompt: str,
     model,
@@ -2269,14 +2861,398 @@ def check_truth_consistency(
     return runs
 
 
+
+# ═══════════════════════════════════════════════════════════════
+# SKILLS  (lightweight tool-calling / function registry)
+# ═══════════════════════════════════════════════════════════════
+
+# ── Safe math evaluator (no eval(), AST-only) ──────────────────
+_SAFE_OPS: Dict[type, Callable] = {
+    ast.Add:      _operator_module.add,
+    ast.Sub:      _operator_module.sub,
+    ast.Mult:     _operator_module.mul,
+    ast.Div:      _operator_module.truediv,
+    ast.FloorDiv: _operator_module.floordiv,
+    ast.Mod:      _operator_module.mod,
+    ast.Pow:      _operator_module.pow,
+    ast.USub:     _operator_module.neg,
+    ast.UAdd:     _operator_module.pos,
+}
+
+def _eval_node(node: ast.AST) -> float:
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_OPS:
+        return _SAFE_OPS[type(node.op)](_eval_node(node.left), _eval_node(node.right))
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_OPS:
+        return _SAFE_OPS[type(node.op)](_eval_node(node.operand))
+    raise ValueError(f"Unsupported expression: {ast.dump(node)}")
+
+def _skill_calculator(expr: str) -> str:
+    try:
+        tree = ast.parse(expr.strip(), mode="eval")
+        result = _eval_node(tree.body)
+        # Format: drop redundant .0 on whole numbers
+        return str(int(result) if isinstance(result, float) and result.is_integer() else result)
+    except Exception as e:
+        return f"[CALC ERROR] {e}"
+
+def _skill_datetime() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+def _skill_word_count(text: str) -> str:
+    words = len(text.split())
+    chars = len(text)
+    return f"{words} words, {chars} characters"
+
+def _skill_upper(text: str) -> str:
+    return text.upper()
+
+
+class SkillRegistry:
+    """
+    Lightweight function registry for local tool-calling.
+
+    The model signals a skill call by outputting a JSON object on its own line:
+        {"skill": "calculator", "args": {"expr": "12345 * 67890"}}
+
+    The registry intercepts this, runs the function, and returns the result
+    string so it can be injected back into the conversation context.
+    """
+
+    _CALL_RE = re.compile(
+        r'^\s*\{[^{}]*"skill"\s*:\s*"([^"]+)"[^{}]*"args"\s*:\s*(\{[^{}]*\})[^{}]*\}\s*$',
+        re.MULTILINE,
+    )
+
+    def __init__(self) -> None:
+        self._registry: Dict[str, Dict] = {}
+        # Register built-ins
+        self.register("calculator",  _skill_calculator,  "Evaluate a math expression.",
+                      {"expr": "string — arithmetic expression, e.g. '12 * 34'"})
+        self.register("datetime",    lambda: _skill_datetime(),  "Return current UTC date and time.", {})
+        self.register("word_count",  _skill_word_count,  "Count words and characters in text.",
+                      {"text": "string"})
+        self.register("upper",       _skill_upper,       "Convert text to upper-case.",
+                      {"text": "string"})
+
+    def register(self, name: str, fn: Callable, description: str = "", params: Optional[Dict] = None) -> None:
+        self._registry[name] = {"fn": fn, "description": description, "params": params or {}}
+
+    # ── System prompt injection ────────────────────────────────
+    def system_prompt(self) -> str:
+        lines = [
+            "You have access to the following skills.",
+            "To call a skill, output ONLY the JSON object on its own line — no other text on that line.",
+            "Format:  {\"skill\": \"<name>\", \"args\": {<key>: <value>, ...}}",
+            "",
+            "Available skills:",
+        ]
+        for name, meta in self._registry.items():
+            param_str = ", ".join(f"{k}: {v}" for k, v in meta["params"].items()) if meta["params"] else "no args"
+            lines.append(f'  {name}({param_str}) — {meta["description"]}')
+        lines += [
+            "",
+            "After you receive a [SKILL RESULT], incorporate it naturally into your reply.",
+            "Never call a skill more than once per turn.",
+        ]
+        return "\n".join(lines)
+
+    # ── Detection + execution ──────────────────────────────────
+    def detect_call(self, text: str) -> Optional[Tuple[str, Dict]]:
+        """Return (skill_name, args_dict) if text contains a valid skill call, else None."""
+        for line in text.splitlines():
+            m = self._CALL_RE.match(line)
+            if m:
+                skill_name = m.group(1)
+                try:
+                    args = json.loads(m.group(2))
+                    return skill_name, args
+                except json.JSONDecodeError:
+                    continue
+        return None
+
+    def execute(self, name: str, args: Dict) -> str:
+        if name not in self._registry:
+            return f"[SKILL ERROR] Unknown skill '{name}'. Available: {list(self._registry)}"
+        try:
+            fn = self._registry[name]["fn"]
+            return str(fn(**args) if args else fn())
+        except TypeError as e:
+            return f"[SKILL ERROR] Bad arguments for '{name}': {e}"
+        except Exception as e:
+            return f"[SKILL ERROR] {e}"
+
+    def list_names(self) -> List[str]:
+        return list(self._registry.keys())
+
+
+# ═══════════════════════════════════════════════════════════════
+# ARTIFACTS  (code / HTML preview renderer)
+# ═══════════════════════════════════════════════════════════════
+
+_ARTIFACT_CODE_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HydrusOPT Artifact — {title}</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{background:#0d1117;color:#c9d1d9;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column}}
+  header{{background:#161b22;border-bottom:1px solid #30363d;padding:10px 18px;display:flex;align-items:center;gap:10px}}
+  .logo{{font-weight:700;font-size:13px;color:#58a6ff;letter-spacing:.5px}}
+  .badge{{background:#1f3a5f;border:1px solid #388bfd55;border-radius:4px;padding:2px 8px;font-size:11px;color:#79c0ff}}
+  .artifact-title{{font-size:12px;color:#8b949e}}
+  pre{{flex:1;overflow:auto;padding:20px 24px;font-family:'Cascadia Code','Fira Code',Consolas,monospace;font-size:13px;line-height:1.65;tab-size:4}}
+  .ln{{display:inline-block;width:2.5em;color:#484f58;text-align:right;margin-right:16px;user-select:none;flex-shrink:0}}
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">HydrusOPT</span>
+  <span class="badge">{lang}</span>
+  <span class="artifact-title">{title}</span>
+</header>
+<pre>{body}</pre>
+</body>
+</html>
+"""
+
+_ARTIFACT_HTML_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HydrusOPT Artifact — {title}</title>
+<style>
+  body{{font-family:'Segoe UI',system-ui,sans-serif;margin:0;background:#fff;}}
+  .hydrus-bar{{background:#0d1117;color:#c9d1d9;font-size:12px;padding:6px 16px;display:flex;gap:10px;align-items:center}}
+  .hydrus-bar .logo{{font-weight:700;color:#58a6ff}}
+  .hydrus-bar .badge{{background:#1f3a5f;border-radius:3px;padding:1px 6px;color:#79c0ff;font-size:11px}}
+  .content{{padding:20px}}
+</style>
+</head>
+<body>
+<div class="hydrus-bar"><span class="logo">HydrusOPT</span><span class="badge">html</span><span>{title}</span></div>
+<div class="content">{body}</div>
+</body>
+</html>
+"""
+
+_ARTIFACT_CODE_BLOCK_RE = re.compile(
+    r"```(\w+)?\n(.*?)```",
+    re.DOTALL,
+)
+
+
+class ArtifactRenderer:
+    """
+    Detects code/HTML fences in model output and writes self-contained
+    HTML artifact files to `output_dir`. Returns file paths so the caller
+    can open them in a browser.
+    """
+
+    def __init__(self, output_dir: str = "artifacts") -> None:
+        self.output_dir = output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        self._counter = 0
+
+    def _next_path(self, lang: str) -> str:
+        self._counter += 1
+        fname = f"artifact_{self._counter:03d}.html"
+        return os.path.join(self.output_dir, fname)
+
+    def _add_line_numbers(self, code: str) -> str:
+        lines = code.splitlines()
+        parts = []
+        for i, line in enumerate(lines, 1):
+            escaped = _html_module.escape(line)
+            parts.append(f'<span class="ln">{i}</span>{escaped}')
+        return "\n".join(parts)
+
+    def render_code(self, code: str, lang: str, title: str) -> str:
+        """Write a syntax-highlighted code artifact. Returns file path."""
+        path = self._next_path(lang)
+        body = self._add_line_numbers(code)
+        content = _ARTIFACT_CODE_TEMPLATE.format(
+            title=_html_module.escape(title), lang=lang or "text", body=body
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return path
+
+    def render_html(self, code: str, title: str) -> str:
+        """Wrap raw HTML in preview chrome. Returns file path."""
+        path = self._next_path("html")
+        content = _ARTIFACT_HTML_TEMPLATE.format(
+            title=_html_module.escape(title), body=code
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return path
+
+    def detect_and_render(self, text: str) -> List[str]:
+        """
+        Scan model output for fenced code blocks. Render each as an artifact.
+        Returns list of file paths written (empty if none found).
+        """
+        paths = []
+        for m in _ARTIFACT_CODE_BLOCK_RE.finditer(text):
+            lang = (m.group(1) or "text").lower().strip()
+            code = m.group(2)
+            title = f"artifact {self._counter + 1}"
+            if lang in ("html", "htm"):
+                path = self.render_html(code, title)
+            else:
+                path = self.render_code(code, lang, title)
+            paths.append(path)
+        return paths
+
+
+# ═══════════════════════════════════════════════════════════════
+# SKILL-AWARE GENERATION + INTERACTIVE CHAT LOOP
+# ═══════════════════════════════════════════════════════════════
+
+def _build_chat_prompt(tokenizer, messages: List[Dict[str, str]]) -> str:
+    """Apply chat template if available; fall back to simple role prefixes."""
+    if hasattr(tokenizer, "apply_chat_template"):
+        try:
+            return tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        except Exception:
+            pass
+    parts = []
+    for msg in messages:
+        role = msg["role"].capitalize()
+        parts.append(f"{role}: {msg['content']}")
+    parts.append("Assistant:")
+    return "\n".join(parts)
+
+
+def generate_with_skills(
+    model,
+    tokenizer,
+    messages: List[Dict[str, str]],
+    skill_registry: SkillRegistry,
+    artifact_renderer: ArtifactRenderer,
+    max_new_tokens: int = 200,
+    max_skill_calls: int = 3,
+) -> str:
+    """
+    Generate a response, detect and execute any skill calls, re-generate
+    with results injected, then detect and render any output artifacts.
+
+    Returns the final assistant text.
+    """
+    device = next(model.parameters()).device
+    model.eval()
+    current_messages = list(messages)
+
+    for _call_round in range(max_skill_calls + 1):
+        prompt = _build_chat_prompt(tokenizer, current_messages)
+        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+
+        with torch.inference_mode():
+            output_ids = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+
+        new_ids = output_ids[0][inputs["input_ids"].shape[-1]:]
+        raw_text = tokenizer.decode(new_ids, skip_special_tokens=True).strip()
+
+        # Detect skill call
+        call = skill_registry.detect_call(raw_text)
+        if call is not None and _call_round < max_skill_calls:
+            skill_name, skill_args = call
+            result = skill_registry.execute(skill_name, skill_args)
+            print(f"\n  [SKILL] {skill_name}({skill_args}) → {result}")
+            # Inject partial assistant turn + tool result and loop
+            current_messages.append({"role": "assistant", "content": raw_text})
+            current_messages.append({
+                "role": "user",
+                "content": f"[SKILL RESULT for {skill_name}] {result}\nNow answer the original question using this result."
+            })
+            continue
+
+        # No skill call (or cap hit) — this is the final response
+        artifact_paths = artifact_renderer.detect_and_render(raw_text)
+        for path in artifact_paths:
+            abs_path = os.path.abspath(path)
+            print(f"\n  [ARTIFACT] Rendered → {abs_path}")
+            try:
+                webbrowser.open(f"file:///{abs_path}")
+            except Exception:
+                pass  # Non-fatal; path is printed above
+
+        return raw_text
+
+    return raw_text  # unreachable but satisfies type checkers
+
+
+def chat_loop(
+    model,
+    tokenizer,
+    skill_registry: SkillRegistry,
+    artifact_renderer: ArtifactRenderer,
+    max_new_tokens: int = 200,
+    max_history_turns: int = 6,
+) -> None:
+    """Interactive REPL with skill-calling and artifact rendering."""
+    skill_sys = skill_registry.system_prompt()
+    history: List[Dict[str, str]] = []
+
+    print("\n" + "=" * 65)
+    print("  HydrusOPT Chat  —  Skills: " + ", ".join(skill_registry.list_names()))
+    print("  Type 'exit' or Ctrl+C to quit.")
+    print("=" * 65)
+
+    while True:
+        try:
+            user_input = input("\n  You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Bye.")
+            break
+
+        if not user_input:
+            continue
+        if user_input.lower() in ("exit", "quit", "bye"):
+            print("  Bye.")
+            break
+
+        messages = [{"role": "system", "content": skill_sys}] + history + [
+            {"role": "user", "content": user_input}
+        ]
+
+        response = generate_with_skills(
+            model, tokenizer, messages,
+            skill_registry, artifact_renderer,
+            max_new_tokens=max_new_tokens,
+        )
+
+        print(f"\n  HydrusOPT: {response}")
+
+        history.append({"role": "user",      "content": user_input})
+        history.append({"role": "assistant", "content": response})
+        # Bound history to last N turns
+        if len(history) > max_history_turns * 2:
+            history = history[-(max_history_turns * 2):]
+
+
 # ═══════════════════════════════════════════════════════════════
 # BENCHMARK + RESULTS
 # ═══════════════════════════════════════════════════════════════
 
+
 TEST_PROMPTS = [
     "Explain quantum entanglement to a 10 year old.",
-    "What are the three most important events in the French Revolution?",
-    "Write a short poem about the ocean at night.",
     "What is the difference between RAM and storage?",
 ]
 
@@ -2739,6 +3715,26 @@ def main():
                         help="Comma-separated grid for verify_no_threshold")
     parser.add_argument("--auto-tune-math-bypass-grid", type=str, default="0.80,0.85,0.90",
                         help="Comma-separated grid for math_bypass_conf")
+    # ── Skills + Artifacts ──
+    parser.add_argument("--chat", action="store_true",
+                        help="Start interactive chat loop with skill-calling and artifact rendering")
+    parser.add_argument("--enable-skills", action="store_true",
+                        help="Enable skill/tool-calling registry (auto-enabled with --chat)")
+    parser.add_argument("--artifacts-dir", type=str, default="artifacts",
+                        help="Directory to write rendered artifact HTML files (default: artifacts)")
+    parser.add_argument("--chat-max-tokens", type=int, default=200,
+                        help="Max new tokens per chat turn (default: 200)")
+    # ── Research mode ──
+    parser.add_argument("--research", action="store_true",
+                        help="Start research chat: grounds every answer in live academic sources + metacognition eval")
+    parser.add_argument("--research-sources", type=str, default="arxiv,semanticscholar",
+                        help="Comma-separated sources to query: arxiv, pubmed, semanticscholar (default: arxiv,semanticscholar)")
+    parser.add_argument("--research-max-results", type=int, default=3,
+                        help="Max results to fetch per source (default: 3)")
+    parser.add_argument("--research-no-eval", action="store_true",
+                        help="Skip the metacognition eval pass in research mode (faster, less safe)")
+    parser.add_argument("--research-threshold", type=float, default=0.72,
+                        help="Confidence threshold for metacognition eval in research mode (default: 0.72)")
     args = parser.parse_args()
 
     # Speculative decoding is hard-disabled in the active pipeline due repeated regressions.
@@ -2844,6 +3840,40 @@ def main():
                 pass
     param_count = sum(p.numel() for p in model.parameters()) / 1e9
     print(f"  ✓ Loaded — {param_count:.2f}B parameters\n")
+
+    # ── Research mode — grounded retrieval + metacognition eval ──
+    if args.research:
+        sources = [s.strip() for s in args.research_sources.split(",") if s.strip()]
+        retriever = ResearchRetriever(
+            sources=sources,
+            max_results_per_source=args.research_max_results,
+        )
+        skill_registry = SkillRegistry()
+        artifact_renderer = ArtifactRenderer(output_dir=args.artifacts_dir)
+        research_chat_loop(
+            model, tokenizer,
+            retriever=retriever,
+            artifact_renderer=artifact_renderer,
+            skill_registry=skill_registry,
+            max_tokens=args.chat_max_tokens,
+            meta_threshold=args.research_threshold,
+            run_eval=not args.research_no_eval,
+        )
+        return
+
+    # ── Chat mode — launches interactive REPL, skips all benchmarking ──
+    if args.chat or args.enable_skills:
+        skill_registry = SkillRegistry()
+        artifact_renderer = ArtifactRenderer(output_dir=args.artifacts_dir)
+        if args.chat:
+            chat_loop(
+                model, tokenizer,
+                skill_registry, artifact_renderer,
+                max_new_tokens=args.chat_max_tokens,
+            )
+            return
+        # --enable-skills without --chat: just confirm it is wired and fall through
+        print("  [Skills] Registry active:", skill_registry.list_names())
 
     # ── Baseline benchmark (uncompiled, no SWA — plain model reference) ──
     print("  ⏱  Benchmarking baseline...")

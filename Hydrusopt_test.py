@@ -1492,6 +1492,8 @@ def _sanitize_answer_text(text: str) -> str:
     s = re.sub(r"(?im)^\s*(?:answer|response|output)\s*[:\-]\s*", "", s)
     s = re.sub(r"\s+", " ", s).strip()
     s = re.sub(r"\s*([,;:])\s*$", "", s).strip()
+    # Strip trailing hashtag chains (social-media formatting artifact, e.g. "#Topic #More")
+    s = re.sub(r"(\s*#\w+)+\s*$", "", s).strip()
     return s
 
 
@@ -3922,7 +3924,8 @@ def update_prompt_benchmark_trends(
 
 
 def print_final_report(baseline, linearised_only, full_stack, quant_map, layers_linearised,
-                        reliability_latency_per_answer_s: Optional[float] = None):
+                        reliability_latency_per_answer_s: Optional[float] = None,
+                        baseline_latency_per_answer_s: Optional[float] = None):
     """
     Print the HydrusOpt benchmark report with two investor-facing modes:
 
@@ -3951,10 +3954,17 @@ def print_final_report(baseline, linearised_only, full_stack, quant_map, layers_
     # Baseline latency per answer: tokens_per_answer / baseline_tok_per_sec
     # Use benchmark_max_tokens as a proxy for answer length (conservative — real answers are shorter)
     avg_answer_tokens = full_stack.get("avg_tokens_per_run") or 80
-    baseline_latency  = avg_answer_tokens / max(baseline_tok or 0.1, 0.1)
+    # Prefer wall-clock measured baseline (same prompts, no guard) for apples-to-apples Safety Tax.
+    # Fall back to tok/s estimate only when no wall-clock baseline is available.
+    if baseline_latency_per_answer_s is not None:
+        baseline_latency = baseline_latency_per_answer_s
+    else:
+        baseline_latency  = avg_answer_tokens / max(baseline_tok or 0.1, 0.1)
+    raw_tax_pct       = 0.0
     if reliability_latency_per_answer_s is not None:
         rel_latency       = reliability_latency_per_answer_s
-        safety_tax_pct    = percent_delta(rel_latency, baseline_latency)
+        raw_tax_pct       = percent_delta(rel_latency, baseline_latency)
+        safety_tax_pct    = max(0.0, raw_tax_pct)
         rel_latency_known = True
     else:
         rel_latency       = baseline_latency   # fallback: no data
@@ -3971,32 +3981,42 @@ def print_final_report(baseline, linearised_only, full_stack, quant_map, layers_
     print("  └─────────────────────────────────────────────────────┘")
     print(f"\n  {'Model':<22} {'Tokens/sec':>10}   {'vs Baseline':>18}")
     print(f"  {'─'*54}")
-    baseline_tok_str = f"{baseline_tok:.1f}" if baseline_tok is not None else "n/a (--no-bench)"
-    perf_tok_str     = f"{perf_tok:.1f}"     if perf_tok     is not None else "n/a (--no-bench)"
+    baseline_tok_str = f"{baseline_tok:.1f}" if baseline_tok is not None else "n/a"
+    perf_tok_str     = f"{perf_tok:.1f}"     if perf_tok     is not None else "n/a"
     perf_delta_str   = f"{perf_pct:+.1f}% ({perf_trend})" if perf_tok is not None else "— (skipped)"
     print(f"  {'Baseline (vanilla)':<22} {baseline_tok_str:>18}   {'— (reference)':>18}")
     print(f"  {'HydrusOpt (perf)':<22} {perf_tok_str:>18}   {perf_delta_str:>18}")
 
     # ── MODE 2: RELIABILITY ───────────────────────────────────────
     print("\n  ┌─────────────────────────────────────────────────────┐")
-    print("  │  MODE 2 · RELIABILITY  (latency per verified answer)│")
+    print("  │  MODE 2 · RELIABILITY  (wall-clock sec/answer,     │")
+    print("  │  same prompts · vanilla vs full guard stack)        │")
     print("  └─────────────────────────────────────────────────────┘")
     print(f"\n  {'Model':<26} {'Sec/answer':>10}   {'Overhead':>14}")
     print(f"  {'─'*54}")
-    baseline_lat_str = f"{baseline_latency:.2f}s" if baseline_tok is not None else "n/a"
-    print(f"  {'Baseline (vanilla)':<26} {baseline_lat_str:>10}   {'— (reference)':>14}")
+    # Show "n/a" only when neither wall-clock nor tok/s baseline is available
+    baseline_lat_str = f"{baseline_latency:.2f}s" if (baseline_latency_per_answer_s is not None or baseline_tok is not None) else "n/a"
+    print(f"  {'Baseline (no guard)':<26} {baseline_lat_str:>10}   {'— (reference)':>14}")
     if rel_latency_known:
-        overhead_label = f"+{safety_tax_pct:.0f}% latency"
-        print(f"  {'HydrusOpt (reliable)':<26} {rel_latency:>10.2f}s  {overhead_label:>14}")
+        if raw_tax_pct < 0:
+            overhead_label = f"{-raw_tax_pct:.0f}% faster"
+        else:
+            overhead_label = f"+{safety_tax_pct:.0f}% latency"
+        print(f"  {'HydrusOpt (full guard)':<26} {rel_latency:>10.2f}s  {overhead_label:>14}")
     else:
-        print(f"  {'HydrusOpt (reliable)':<26} {'n/a':>10}   {'run benchmark':>14}")
+        print(f"  {'HydrusOpt (full guard)':<26} {'n/a':>10}   {'run benchmark':>14}")
 
     # ── SAFETY TAX ────────────────────────────────────────────────
     print("\n  ┌─────────────────────────────────────────────────────┐")
     print("  │  SAFETY TAX  (cost of hallucination-proof output)   │")
     print("  └─────────────────────────────────────────────────────┘")
     if rel_latency_known:
-        if safety_tax_pct <= 15:
+        if raw_tax_pct < 0:
+            verdict = (
+                f"  HydrusOpt delivers verified, hallucination-proof output with NO Safety Tax.\n"
+                f"  Full guard stack is {-raw_tax_pct:.0f}% faster than vanilla on the same prompts."
+            )
+        elif safety_tax_pct <= 15:
             verdict = (
                 f"  HydrusOpt delivers verified, hallucination-proof output\n"
                 f"  for a Safety Tax of only {safety_tax_pct:.0f}% extra latency per answer."
@@ -4052,8 +4072,13 @@ def print_final_report(baseline, linearised_only, full_stack, quant_map, layers_
             },
             "safety_tax_pct": round(safety_tax_pct, 1) if rel_latency_known else None,
             "safety_tax_narrative": (
-                f"HydrusOpt adds {safety_tax_pct:.0f}% latency per answer for "
-                f"hallucination-proof cognitive verification."
+                (
+                    f"HydrusOpt delivers verified output with no safety tax "
+                    f"(full guard stack is {-raw_tax_pct:.0f}% faster than vanilla on the same prompts)."
+                    if raw_tax_pct < 0 else
+                    f"HydrusOpt adds {safety_tax_pct:.0f}% latency per answer for "
+                    f"hallucination-proof cognitive verification."
+                )
                 if rel_latency_known else
                 "Run full benchmark to compute Safety Tax."
             ),
@@ -4777,11 +4802,26 @@ def main():
                     print(f"  [CYBERNETIC] monitor report saved to {args.save_monitor}")
 
     # ── Reliability microbenchmark (guarded generation on TEST_PROMPTS) ──
-    # Measures wall-clock latency per verified answer (all guard passes included).
+    # Both passes use identical TEST_PROMPTS so the comparison is wall-clock apples-to-apples.
     # Safety Tax = (verified_latency - baseline_latency) / baseline_latency * 100%
+    baseline_latency_per_answer_s: Optional[float] = None
     reliability_latency_per_answer_s: Optional[float] = None
     try:
-        print("\n  [RELIABILITY] Timing verified answer latency...")
+        # Pass 1: vanilla baseline (no guard) — establishes the reference wall-clock latency
+        print("\n  [RELIABILITY] Timing vanilla baseline (no guard)...")
+        _base_t0 = time.perf_counter()
+        model.eval()
+        with torch.inference_mode():
+            for _rp in TEST_PROMPTS:
+                _rp_max_tokens = _adaptive_max_tokens(_rp, getattr(args, "answer_max_tokens", 0))
+                _generate_clean_text(_rp, model, tokenizer, max_tokens=_rp_max_tokens)
+        baseline_latency_per_answer_s = (time.perf_counter() - _base_t0) / len(TEST_PROMPTS)
+    except Exception:
+        pass
+
+    try:
+        # Pass 2: full guard stack — what HydrusOpt actually delivers
+        print("\n  [RELIABILITY] Timing verified answer latency (full guard stack)...")
         _rel_t0 = time.perf_counter()
         model.eval()
         with torch.inference_mode():
@@ -4815,7 +4855,8 @@ def main():
 
     # ── Final Report ──
     print_final_report(baseline_results, linearised_results, full_stack_results, quant_map, layers_linearised,
-                        reliability_latency_per_answer_s=reliability_latency_per_answer_s)
+                        reliability_latency_per_answer_s=reliability_latency_per_answer_s,
+                        baseline_latency_per_answer_s=baseline_latency_per_answer_s)
     update_global_benchmark_trends(args, baseline_results, linearised_results, full_stack_results)
     if args.check_consistency and consistency_runs is not None:
         update_prompt_benchmark_trends(
